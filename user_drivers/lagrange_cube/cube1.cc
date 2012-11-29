@@ -41,8 +41,14 @@ using namespace std;
 using namespace oomph;
 
 
-struct SquareLagrangeVariables
+struct CubeLagrangeVariables
 {
+
+  /// Lagrange Multiplier ID 
+  unsigned Lagrange_multiplier_po;
+  unsigned Lagrange_multiplier_ib;
+
+
   unsigned W_solver; // CL
   unsigned NS_solver; // CL
   unsigned F_solver; // CL
@@ -67,13 +73,18 @@ struct SquareLagrangeVariables
   std::string Rey_str; // To set from CL
   std::string Noel_str; // To set from CL
   std::string Sigma_str; // Set from CL
+  std::string W_approx_str;
 
   bool Use_axnorm; // To set from CL
   bool Use_diagonal_w_block;
 
   // Setting the defaults:
-  SquareLagrangeVariables()
+  CubeLagrangeVariables()
   {
+    /// Lagrange Multiplier ID 
+    Lagrange_multiplier_po = 42;
+    Lagrange_multiplier_ib = 43;
+
     W_solver = 0; // 0 - Exact, no other solver coded in driver.
     NS_solver = 1; // 0 - Exact, 1 - LSC
     F_solver = 0; // 0 - Exact, 1 - multigrid.
@@ -102,8 +113,13 @@ struct SquareLagrangeVariables
     Rey_str = "r100"; // To set from CL
     Noel_str = "n4"; // To set from CL
     Sigma_str = ""; // Set from CL
+    W_approx_str = "dw";
   }
 };
+
+
+
+
 
 //===start_of_namespace=================================================
 /// Namepspace for global parameters
@@ -138,11 +154,6 @@ namespace Global_Parameters
  string Noel_str = "";
  string Current_settings = "";
  
- /// Storage for number of iterations during Newton steps 
- Vector<unsigned> Iterations;
- 
- /// Storage for linear solver times during Newton steps 
- Vector<double> Linear_solver_time;
  
  // counter for the current newtown steps
  unsigned before_newton_step_counter = 0;
@@ -158,7 +169,7 @@ namespace Global_Parameters
 
  bool Use_lsc = false;
  
- unsigned NS_solver = 0;
+ unsigned NS_solver = 1;
  unsigned F_solver = 0;
  unsigned P_solver = 0; 
  unsigned Use_diagonal_w_block = true;
@@ -231,25 +242,47 @@ class ParallelOutflowBoundaryProblem : public Problem
 public:
 
  /// Constructor
- ParallelOutflowBoundaryProblem(const unsigned& n_element);
+ ParallelOutflowBoundaryProblem(CubeLagrangeVariables&, DocInfo&);
 
  /// Update before solve is empty
  void actions_before_newton_solve() 
  {
    // Initialise counters for each newton solve.
    Doc_info_pt->setup_new_time_step();
-   //Global_Parameters::Iterations.clear();
-   //Global_Parameters::Linear_solver_time.clear();
  } // actions_before_newton_solve
 
  void actions_after_newton_step()
  {
-   Global_Parameters::Iterations.push_back(
-       dynamic_cast<IterativeLinearSolver*>
-       (this->linear_solver_pt())->iterations());
+   
+   unsigned iters = 0;
+   double solver_time = 0.0;
 
-   Global_Parameters::Linear_solver_time.push_back(
-       linear_solver_pt()->linear_solver_solution_time());
+#ifdef PARANOID
+   IterativeLinearSolver* iterative_solver_pt
+     = dynamic_cast<IterativeLinearSolver*>
+       (this->linear_solver_pt());
+   if(iterative_solver_pt == 0)
+   {
+     std::ostringstream error_message;
+     error_message << "Cannot cast the solver pointer." << std::endl;
+
+     throw OomphLibError(error_message.str(),
+                         "TiltedCavityProblem",
+                         OOMPH_EXCEPTION_LOCATION);
+   }
+   else
+   {
+     iters = iterative_solver_pt->iterations();
+   }
+#else
+   iters = static_cast<IterativeLinearSolver*>
+             (this->linear_solver_pt())->iterations();
+#endif
+
+   solver_time = linear_solver_pt()->linear_solver_solution_time();
+
+   Doc_info_pt->add_iteration_and_time(iters,solver_time);
+
  }
  
 
@@ -301,6 +334,10 @@ private:
  /// Solver
  IterativeLinearSolver* Solver_pt;
 
+ DocInfo* Doc_info_pt;
+
+ CubeLagrangeVariables* Myvar_pt;
+
 };
 
 
@@ -310,19 +347,23 @@ private:
 //========================================================================
 template<class ELEMENT> 
 ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
- const unsigned& n_el)
+ CubeLagrangeVariables &myvar, DocInfo &doc_info)
 { 
+
+  Doc_info_pt = &doc_info;
+  Myvar_pt = &myvar;
+
 
  // Setup mesh
  
  // # of elements in x-direction
- unsigned n_x=n_el;
+ unsigned n_x=myvar.Noel;
  
  // # of elements in y-direction
- unsigned n_y=n_el;
+ unsigned n_y=myvar.Noel;
 
  // # of elements in z-direction
- unsigned n_z=n_el;
+ unsigned n_z=myvar.Noel;
  
  // Domain length in x-direction
  double l_x=1.0;
@@ -336,9 +377,9 @@ ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
  // Build and assign mesh
  Bulk_mesh_pt = 
   new SlopingCubicMesh<ELEMENT >(n_x,n_y,n_z,l_x,l_y,l_z,
-                                 Global_Parameters::Ang_x,
-                                 Global_Parameters::Ang_y,
-                                 Global_Parameters::Ang_z);
+                                 myvar.Ang_x,
+                                 myvar.Ang_y,
+                                 myvar.Ang_z);
 
 // Create "surface mesh" that will contain only the Lagrange multiplier 
  // elements.
@@ -405,37 +446,37 @@ ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
     double tilt_back_y = 0;
     double tilt_back_z = 0;
 
-    tilt_back_x = x*(cos(-Global_Parameters::Ang_y)
-                     *cos(-Global_Parameters::Ang_z))
-                  +y*(cos(-Global_Parameters::Ang_z)
-                      *sin(-Global_Parameters::Ang_x)
-                    *sin(-Global_Parameters::Ang_y) 
-                    - cos(-Global_Parameters::Ang_x)
-                    *sin(-Global_Parameters::Ang_z))
-                  +z*(sin(-Global_Parameters::Ang_x)
-                      *sin(-Global_Parameters::Ang_z) 
-                      + cos(-Global_Parameters::Ang_x)
-                      *cos(-Global_Parameters::Ang_z)
-                      *sin(-Global_Parameters::Ang_y));
+    tilt_back_x = x*(cos(-myvar.Ang_y)
+                     *cos(-myvar.Ang_z))
+                  +y*(cos(-myvar.Ang_z)
+                      *sin(-myvar.Ang_x)
+                    *sin(-myvar.Ang_y) 
+                    - cos(-myvar.Ang_x)
+                    *sin(-myvar.Ang_z))
+                  +z*(sin(-myvar.Ang_x)
+                      *sin(-myvar.Ang_z) 
+                      + cos(-myvar.Ang_x)
+                      *cos(-myvar.Ang_z)
+                      *sin(-myvar.Ang_y));
 
-    tilt_back_y = x*(cos(-Global_Parameters::Ang_y)
-                            *sin(-Global_Parameters::Ang_z))
-     + y*(cos(-Global_Parameters::Ang_x)
-          *cos(-Global_Parameters::Ang_z) 
-          + sin(-Global_Parameters::Ang_x)
-          *sin(-Global_Parameters::Ang_y)
-          *sin(-Global_Parameters::Ang_z))
-     + z*(cos(-Global_Parameters::Ang_x)
-          *sin(-Global_Parameters::Ang_y)
-          *sin(-Global_Parameters::Ang_z) 
-          - cos(-Global_Parameters::Ang_z)
-          *sin(-Global_Parameters::Ang_x));
+    tilt_back_y = x*(cos(-myvar.Ang_y)
+                            *sin(-myvar.Ang_z))
+     + y*(cos(-myvar.Ang_x)
+          *cos(-myvar.Ang_z) 
+          + sin(-myvar.Ang_x)
+          *sin(-myvar.Ang_y)
+          *sin(-myvar.Ang_z))
+     + z*(cos(-myvar.Ang_x)
+          *sin(-myvar.Ang_y)
+          *sin(-myvar.Ang_z) 
+          - cos(-myvar.Ang_z)
+          *sin(-myvar.Ang_x));
           
-    tilt_back_z = -x*sin(-Global_Parameters::Ang_y)
-     +y*cos(-Global_Parameters::Ang_y)
-     *sin(-Global_Parameters::Ang_x)
-     +z*cos(-Global_Parameters::Ang_x)
-     *cos(-Global_Parameters::Ang_y);
+    tilt_back_z = -x*sin(-myvar.Ang_y)
+     +y*cos(-myvar.Ang_y)
+     *sin(-myvar.Ang_x)
+     +z*cos(-myvar.Ang_x)
+     *cos(-myvar.Ang_y);
 
     // The imposed velocity
     double ref_u_x = 0.0;
@@ -464,35 +505,35 @@ ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
     double imposed_u_y = 0.0;
     double imposed_u_z = 0.0;
 
-     imposed_u_x = ref_u_x*cos(Global_Parameters::Ang_y)
-                          *cos(Global_Parameters::Ang_z)
-                   -ref_u_y*cos(Global_Parameters::Ang_y)
-                           *sin(Global_Parameters::Ang_z)
-                   +ref_u_z*sin(Global_Parameters::Ang_y);
-     imposed_u_y = ref_u_x*(cos(Global_Parameters::Ang_x)
-                          *sin(Global_Parameters::Ang_z) 
-                          +cos(Global_Parameters::Ang_z)
-                          *sin(Global_Parameters::Ang_x)
-                          *sin(Global_Parameters::Ang_y))
-                   +ref_u_y*(cos(Global_Parameters::Ang_x)
-                           *cos(Global_Parameters::Ang_z) 
-                           -sin(Global_Parameters::Ang_x)
-                           *sin(Global_Parameters::Ang_y)
-                           *sin(Global_Parameters::Ang_z))
-                   -ref_u_z*(cos(Global_Parameters::Ang_y)
-                           *sin(Global_Parameters::Ang_x));
-     imposed_u_z = ref_u_x*(sin(Global_Parameters::Ang_x)
-                          *sin(Global_Parameters::Ang_z) 
-                          -cos(Global_Parameters::Ang_x)
-                          *cos(Global_Parameters::Ang_z)
-                          *sin(Global_Parameters::Ang_y))
-                   +ref_u_y*(cos(Global_Parameters::Ang_z)
-                           *sin(Global_Parameters::Ang_x) 
-                           +cos(Global_Parameters::Ang_x)
-                           *sin(Global_Parameters::Ang_y)
-                           *sin(Global_Parameters::Ang_z))
-                   +ref_u_z*(cos(Global_Parameters::Ang_x)
-                           *cos(Global_Parameters::Ang_y));
+     imposed_u_x = ref_u_x*cos(myvar.Ang_y)
+                          *cos(myvar.Ang_z)
+                   -ref_u_y*cos(myvar.Ang_y)
+                           *sin(myvar.Ang_z)
+                   +ref_u_z*sin(myvar.Ang_y);
+     imposed_u_y = ref_u_x*(cos(myvar.Ang_x)
+                          *sin(myvar.Ang_z) 
+                          +cos(myvar.Ang_z)
+                          *sin(myvar.Ang_x)
+                          *sin(myvar.Ang_y))
+                   +ref_u_y*(cos(myvar.Ang_x)
+                           *cos(myvar.Ang_z) 
+                           -sin(myvar.Ang_x)
+                           *sin(myvar.Ang_y)
+                           *sin(myvar.Ang_z))
+                   -ref_u_z*(cos(myvar.Ang_y)
+                           *sin(myvar.Ang_x));
+     imposed_u_z = ref_u_x*(sin(myvar.Ang_x)
+                          *sin(myvar.Ang_z) 
+                          -cos(myvar.Ang_x)
+                          *cos(myvar.Ang_z)
+                          *sin(myvar.Ang_y))
+                   +ref_u_y*(cos(myvar.Ang_z)
+                           *sin(myvar.Ang_x) 
+                           +cos(myvar.Ang_x)
+                           *sin(myvar.Ang_y)
+                           *sin(myvar.Ang_z))
+                   +ref_u_z*(cos(myvar.Ang_x)
+                           *cos(myvar.Ang_y));
   
     nod_pt->set_value(0,imposed_u_x);
     nod_pt->set_value(1,imposed_u_y);
@@ -514,7 +555,7 @@ ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
  // cout << "testdimmmm " << el_pt->dim() << endl;
  //pause("Dalle!"); 
    //Set the Reynolds number
-   el_pt->re_pt() = &Global_Parameters::Re;
+   el_pt->re_pt() = &myvar.Rey;
   }
  
  // Setup equation numbering scheme
@@ -554,19 +595,18 @@ ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
  // The preconditioner for the fluid block:
  ConstrainedNavierStokesSchurComplementPreconditioner* ns_preconditioner_pt =
  new ConstrainedNavierStokesSchurComplementPreconditioner;
-
- if(Global_Parameters::NS_solver == 0) // Exact solve.
+ 
+ if(myvar.NS_solver == 0) // Exact solve.
  {
  }
- else if(Global_Parameters::NS_solver == 1) // LSC
+ else if(myvar.NS_solver == 1) // LSC
  {
-
    prec_pt->set_navier_stokes_lsc_preconditioner(ns_preconditioner_pt);
    ns_preconditioner_pt->set_navier_stokes_mesh(Bulk_mesh_pt);
 
    // F block solve
    // myvar.F_solver == 0 is default, so do nothing.
-   if(Global_Parameters::F_solver == 1)
+   if(myvar.F_solver == 1)
    {
 #ifdef OOMPH_HAS_HYPRE
      // LSC takes type "Preconditioner".
@@ -587,7 +627,7 @@ ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
 
    // P block solve
    //myvar.P_solver == 0 is default, so do nothing.
-   if(Global_Parameters::P_solver == 1)
+   if(myvar.P_solver == 1)
    {
 #ifdef OOMPH_HAS_HYPRE
      Preconditioner* p_preconditioner_pt = new HyprePreconditioner;
@@ -611,7 +651,7 @@ ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
  // Set the doc info for book keeping purposes.
  //prec_pt->set_doc_info(&doc_info);
 
- if(Global_Parameters::Use_diagonal_w_block)
+ if(myvar.Use_diagonal_w_block)
  {
    prec_pt->use_diagonal_w_block();
  }
@@ -626,15 +666,6 @@ ParallelOutflowBoundaryProblem<ELEMENT>::ParallelOutflowBoundaryProblem(
  //}
 
 
-
- //if(Global_Parameters::Use_lsc)
- //{
- //  prec_pt->use_lsc(); 
- //}
- //else
-// {
-//   prec_pt->use_exact();
-// }
 
  // Build solve and preconditioner
  Solver_pt = new GMRES<CRDoubleMatrix>;
@@ -660,7 +691,7 @@ void ParallelOutflowBoundaryProblem<ELEMENT>::doc_solution(DocInfo& doc_info)
 { 
  ofstream some_file;
  char filename[100];
- if(Global_Parameters::Doc_solution)
+ if(doc_info.is_doc_prec_data_enabled())
  {
    // Number of plot points
  unsigned npts;
@@ -668,7 +699,7 @@ void ParallelOutflowBoundaryProblem<ELEMENT>::doc_solution(DocInfo& doc_info)
 
  // Output solution 
  sprintf(filename,"%s/%s.dat",doc_info.directory().c_str(),
-         Global_Parameters::Current_settings.c_str());
+         doc_info.label().c_str());
  some_file.open(filename);
  Bulk_mesh_pt->output(some_file,npts);
  some_file.close();
@@ -930,6 +961,8 @@ int main(int argc, char* argv[])
  MPI_Helpers::init(argc,argv);
 #endif
 
+CubeLagrangeVariables myvar = CubeLagrangeVariables();
+
  // Set up doc info
  DocInfo doc_info;
  doc_info.number()=0;
@@ -1012,47 +1045,110 @@ int main(int argc, char* argv[])
               << " on " << ctime (&rawtime) << endl;
 
  ParallelOutflowBoundaryProblem<
-   QTaylorHoodElement<3> > problem(n_el_1d);
+   QTaylorHoodElement<3> > problem(myvar,doc_info);
 
  // Solve the problem 
  problem.newton_solve();
            
  // Doc solution
  problem.doc_solution(doc_info);
- doc_info.number()++;
-
-         // Output number of iterations
-         unsigned iter = Global_Parameters::Iterations.size();
-         double total_its = 0;
-         cout << "RAYITS: ";
-         for (unsigned j = 0; j < iter; j++)
-         {
-           total_its += Global_Parameters::Iterations[j];
-           cout << Global_Parameters::Iterations[j] << " ";
-         }
-         double average_its = total_its/iter;
-          
-          // Print to one decimal place if the average its is not an exact
-          // integer. Otherwise we print normally.
-         ((int(average_its*10))%10)?
-         cout << "\t"<< fixed << setprecision(1)
-              << average_its << "(" << iter << ")" << endl:
-         cout << "\t"<< average_its << "(" << iter << ")" << endl;
+// doc_info.number()++;
 
 
-         // Output linear solver time 
-         double total_time = 0;
-         cout << "RAYTIME: " << setprecision(15);
-         for (unsigned j = 0; j < iter; j++)
-         {
-           total_time += Global_Parameters::Linear_solver_time[j];
-           cout << Global_Parameters::Linear_solver_time[j] << " ";
-         }
-         double average_time = total_time/iter;
-          
-          // Print to one decimal place if the average its is not an exact
-          // integer. Otherwise we print normally.
-         cout << "\t" << average_time << endl;
+ // Get the iteration count and time from the doc_info
+ Vector<Vector<pair<unsigned, double> > > iters_times
+   = doc_info.iterations_and_times();
+
+ // Below outputs the iteration counts and time.
+ // Output the number of iterations
+ // Since this is a steady state problem, there is only
+ // one "time step".
+ //*
+
+ // Loop over the time step:
+ unsigned ntimestep = iters_times.size();
+ for(unsigned intimestep = 0; intimestep < ntimestep; intimestep++)
+ {
+   // New timestep:
+   std::cout << "RAYITS:\t" << intimestep << "\t";
+   // Loop through the Newtom Steps
+   unsigned nnewtonstep = iters_times[intimestep].size();
+   unsigned sum_of_newtonstep_iters = 0;
+   for(unsigned innewtonstep = 0; innewtonstep < nnewtonstep;
+       innewtonstep++)
+   {
+      sum_of_newtonstep_iters += iters_times[intimestep][innewtonstep].first;
+      std::cout << iters_times[intimestep][innewtonstep].first << " ";
+   }
+   double average_its = ((double)sum_of_newtonstep_iters)
+                        / ((double)nnewtonstep);
+
+   // Print to one decimal place if the average is not an exact
+   // integer. Ohterwise we print normally.
+   ((unsigned(average_its*10))%10)?
+   std::cout << "\t"<< fixed << setprecision(1)
+             << average_its << "(" << nnewtonstep << ")" << endl:
+   std::cout << "\t"<< average_its << "(" << nnewtonstep << ")" << std::endl;
+
+ }
+
+ // Now doing the times
+ for(unsigned intimestep = 0; intimestep < ntimestep; intimestep++)
+ {
+   // New timestep:
+   std::cout << "RAYTIME:\t" << intimestep << "\t";
+   // Loop through the Newtom Steps
+   unsigned nnewtonstep = iters_times[intimestep].size();
+   double sum_of_newtonstep_times = 0;
+   for(unsigned innewtonstep = 0; innewtonstep < nnewtonstep;
+       innewtonstep++)
+   {
+      sum_of_newtonstep_times += iters_times[intimestep][innewtonstep].second;
+      std::cout << iters_times[intimestep][innewtonstep].second << " ";
+   }
+   double average_time = ((double)sum_of_newtonstep_times)
+                        / ((double)nnewtonstep);
+
+   // Print to one decimal place if the average is not an exact
+   // integer. Ohterwise we print normally.
+   std::cout << "\t"<< average_time << "(" << nnewtonstep << ")" << endl;
+ }
+
+
+
+
+//         // Output number of iterations
+//         unsigned iter = Global_Parameters::Iterations.size();
+//         double total_its = 0;
+//         cout << "RAYITS: ";
+//         for (unsigned j = 0; j < iter; j++)
+//         {
+//           total_its += Global_Parameters::Iterations[j];
+//           cout << Global_Parameters::Iterations[j] << " ";
+//         }
+//         double average_its = total_its/iter;
+//          
+//          // Print to one decimal place if the average its is not an exact
+//          // integer. Otherwise we print normally.
+//         ((int(average_its*10))%10)?
+//         cout << "\t"<< fixed << setprecision(1)
+//              << average_its << "(" << iter << ")" << endl:
+//         cout << "\t"<< average_its << "(" << iter << ")" << endl;
+//
+//
+//         // Output linear solver time 
+//         double total_time = 0;
+//         cout << "RAYTIME: " << setprecision(15);
+//         for (unsigned j = 0; j < iter; j++)
+//         {
+//           total_time += Global_Parameters::Linear_solver_time[j];
+//           cout << Global_Parameters::Linear_solver_time[j] << " ";
+//         }
+//         double average_time = total_time/iter;
+//          
+//          // Print to one decimal place if the average its is not an exact
+//          // integer. Otherwise we print normally.
+//         cout << "\t" << average_time << endl;
          
          time ( &rawtime );
          cout << "RAYDONE: " 
