@@ -302,15 +302,18 @@ namespace oomph
 
   // We only need the velocity mass matrix
   bool do_both=false;
-  
+     
   double ivmm_assembly_start_t = TimingHelpers::timer();
   for (unsigned vdof_i = 0; vdof_i < N_velocity_doftypes; vdof_i++) 
   {
     unsigned required_block_number = Master_doftype_order[vdof_i];
-    assemble_inv_press_and_veloc_mass_matrix_diagonal
+    std::cout << "vodf_i: " << vdof_i << " re. block: "<< required_block_number<< std::endl; 
+    
+     assemble_inv_press_and_veloc_mass_matrix_diagonal
       (inv_p_mass_pt, inv_vmm_pts(0,vdof_i), do_both, 
        required_block_number,problem_pt);
   }
+    pause("doumooo"); 
     
     
   double ivmm_assembly_finish_t = TimingHelpers::timer();

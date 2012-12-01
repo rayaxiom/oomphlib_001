@@ -549,6 +549,8 @@ namespace oomph
    const LinearAlgebraDistribution*
     block_distribution_pt(const unsigned b) const
     {
+      std::cout << "size of block_dis: "<<  Block_distribution_pt.size()<< std::endl; 
+      
      return Block_distribution_pt[b];
     }
 
@@ -686,6 +688,7 @@ namespace oomph
      // clear the Distributions
      this->clear_distribution();
      unsigned nblock = Block_distribution_pt.size();
+
      for (unsigned b = 0; b < nblock; b++)
       {
        delete Block_distribution_pt[b];
@@ -2288,6 +2291,10 @@ namespace oomph
    bool distributed = this->master_distribution_pt()->distributed();
 
    // create the new block distributions
+   std::cout << "Nblock_types: " << Nblock_types << std::endl; 
+   //pause("hmmm"); 
+   
+   
    Block_distribution_pt.resize(Nblock_types);
    for (unsigned i = 0; i < Nblock_types; i++)
     {

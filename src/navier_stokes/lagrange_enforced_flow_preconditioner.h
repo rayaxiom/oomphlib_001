@@ -872,7 +872,7 @@ class LagrangeEnforcedflowPreconditioner
 
   // clean
   this->clean_up_memory();
-
+  
 
   // To construct the required block structure for the preconditoner, we
   // require only the
@@ -1082,7 +1082,7 @@ class LagrangeEnforcedflowPreconditioner
     } // for doftype_i
   } // for mesh_i
 
-  /* //RRR_DUMP
+  //* //RRR_DUMP
   cout << "Doftype_list_vpl[i]:"<< endl;
   for(unsigned i = 0; i < N_dof_types; i++)
   {
@@ -1110,7 +1110,13 @@ class LagrangeEnforcedflowPreconditioner
   Pressure_block_size = Dof_type_block_size[N_velocity_dof_types];
 
   Fluid_block_size = Velocity_block_size + Pressure_block_size;
-
+  
+  std::cout << "Velocity_block_size: " << Velocity_block_size << std::endl; 
+  std::cout << "Pressure_block_size: " << Pressure_block_size << std::endl; 
+  std::cout << "Fluid_block_size: " << Fluid_block_size << std::endl; 
+  
+  
+  
   // Setting up the submatrix dimension file.
   if(Doc_prec)
   {
@@ -1778,6 +1784,8 @@ class LagrangeEnforcedflowPreconditioner
     for (unsigned i = 0; i < N_fluid_dof_types; i++)
     {
       ns_dof_list[i]= i;
+      std::cout << "ns_dof_list: " << i << std::endl; 
+      
     }
 
     // Determine whether the NS preconditioner is a block preconditioner (and
