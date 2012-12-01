@@ -50,9 +50,9 @@ struct SquareLagrangeVariables{
   unsigned NS_solver; // CL
   unsigned F_solver; // CL
   unsigned P_solver; // CL
-  std::string Vis_str; // CL
+  unsigned Vis;
   double Ang; // CL
-  mutable double Rey; // CL
+  double Rey; // CL
   unsigned Noel; // CL
   double Scaling_sigma; // CL
 
@@ -61,22 +61,39 @@ struct SquareLagrangeVariables{
   std::string NS_str; // To set from CL
   std::string F_str; // To set from CL
   std::string P_str; // To set from CL
+  std::string Vis_str; // CL
   std::string Ang_str; // To set from CL
   std::string Rey_str; // To set from CL
   std::string Noel_str; // To set from CL
   std::string Sigma_str; // Set from CL
-
+  std::string W_approx_str;
   bool Use_axnorm; // To set from CL
   bool Use_diagonal_w_block;
 
   // Setting the defaults:
   SquareLagrangeVariables() :
-    W_solver(0),NS_solver(1),F_solver(0),P_solver(0),
-    Vis_str("Sim"),Ang(30.0),Rey(100.0),Noel(4),Scaling_sigma(0),
-    Prob_str("2DStrPo"),W_str("We"),NS_str("NSlsc"),F_str("Fe"),P_str("Pe"),
-    Ang_str("Ang30"),Rey_str("Rey100"),Noel_str("Noel4"),Sigma_str(""),
-
-    Use_axnorm(true), Use_diagonal_w_block(true)
+    W_solver(0), // 0 = Exact, no other W solver coded.
+    NS_solver(1), // 0 = Exact, 1 = LSC
+    F_solver(0), // 0 = Exact, 1 = AMG
+    P_solver(0), // 0 = Exact, 1 = AMG
+    Vis(0), // 0 - Simple, 1 - Stress divergence.
+    Ang(30.0), // Angle, in degrees
+    Rey(100.0), // Reynolds number
+    Noel(4), // Number of elements.
+    Scaling_sigma(0), // Scaling Sigma
+    Prob_str("SETPROBSTR"), // This is set inside the code, not from commandline.
+    W_str("We"), // e - Exact, no other solver.
+    NS_str("Nl"), // e - Exact, l - LSC
+    F_str("Fe"), // e - Exact, a - AMG
+    P_str("Pe"), // e - Exact, a - AMG
+    Vis_str("Sim"), // Sim - Simple, Str = Stress Divergence
+    Ang_str("Z30"), // z - angle of rotation, about the z axis.
+    Rey_str("R100"), // Reynolds number.
+    Noel_str("N4"), // Number of elements.
+    Sigma_str(""), // Sigma string.
+    W_approx_str("dw"), // diagonal approximation
+    Use_axnorm(true), // Use norm of velocity in the x direction for Sigma.
+    Use_diagonal_w_block(true) // Use the diagonal approximation for W.
   {}
 };
 
@@ -680,7 +697,7 @@ pause("closer");
  CommandLineArgs::specify_command_line_flag("--ns_solver", &myvar.NS_solver);
  CommandLineArgs::specify_command_line_flag("--p_solver", &myvar.P_solver);
  CommandLineArgs::specify_command_line_flag("--f_solver", &myvar.F_solver);
- CommandLineArgs::specify_command_line_flag("--visc", &myvar.Vis_str);
+ CommandLineArgs::specify_command_line_flag("--visc", &myvar.Vis);
  CommandLineArgs::specify_command_line_flag("--ang", &myvar.Ang);
  CommandLineArgs::specify_command_line_flag("--rey", &myvar.Rey);
  CommandLineArgs::specify_command_line_flag("--noel", &myvar.Noel);
@@ -711,7 +728,7 @@ cout << "Visc: " << myvar.Vis_str << " Prec: " << myvar.Prec << endl;
  // straight describes the velocity flow field. Po = Parallel outflow
  // describes the boundary type.
  //myvar.Prob_str = "2DStraPo";
- myvar.Prob_str = "";
+ myvar.Prob_str = "Squ";
 
  // Set the string to identify the preconditioning,
  // This is used purely for book keeping purposes.
@@ -742,7 +759,7 @@ cout << "Visc: " << myvar.Vis_str << " Prec: " << myvar.Prec << endl;
       myvar.NS_str = "NSe";
       break;
     case 1:
-      myvar.NS_str = "NSlsc";
+      myvar.NS_str = "NSl";
       break;
     default:
       std::cout << "Do not recognise NS: " << myvar.NS_solver << "\n"
@@ -802,15 +819,17 @@ cout << "Visc: " << myvar.Vis_str << " Prec: " << myvar.Prec << endl;
  // Set the viscuous term.
  if(CommandLineArgs::command_line_flag_has_been_set("--visc"))
  {
-   if (myvar.Vis_str.compare("Str") == 0)
+   if (myvar.Vis == 0)
    {
-     NavierStokesEquations<2>::Gamma[0]=1.0;
-     NavierStokesEquations<2>::Gamma[1]=1.0;
+     myvar.Vis_str = "Sim";
+     NavierStokesEquations<2>::Gamma[0]=0.0;
+     NavierStokesEquations<2>::Gamma[1]=0.0;
    }
    else
    {
-     NavierStokesEquations<2>::Gamma[0]=0.0;
-     NavierStokesEquations<2>::Gamma[1]=0.0;
+     myvar.Vis_str = "Str";
+     NavierStokesEquations<2>::Gamma[0]=1.0;
+     NavierStokesEquations<2>::Gamma[1]=1.0;
    } // else - setting viscuous term.
  }
 
@@ -818,7 +837,7 @@ cout << "Visc: " << myvar.Vis_str << " Prec: " << myvar.Prec << endl;
  if(CommandLineArgs::command_line_flag_has_been_set("--ang"))
  {
    std::ostringstream strs;
-   strs << "Ang" << myvar.Ang;
+   strs << "Z" << myvar.Ang;
    myvar.Ang_str = strs.str();
 
    // Now we need to convert Ang into radians.
@@ -830,7 +849,7 @@ cout << "Visc: " << myvar.Vis_str << " Prec: " << myvar.Prec << endl;
  if(CommandLineArgs::command_line_flag_has_been_set("--rey"))
  {
    std::ostringstream strs;
-   strs << "Rey" << myvar.Rey;
+   strs << "R" << myvar.Rey;
    myvar.Rey_str = strs.str();
  }
 
@@ -838,7 +857,7 @@ cout << "Visc: " << myvar.Vis_str << " Prec: " << myvar.Prec << endl;
  if(CommandLineArgs::command_line_flag_has_been_set("--noel"))
  {
    std::ostringstream strs;
-   strs << "Noel" << myvar.Noel;
+   strs << "N" << myvar.Noel;
    myvar.Noel_str = strs.str();
  }
 
@@ -848,37 +867,36 @@ cout << "Visc: " << myvar.Vis_str << " Prec: " << myvar.Prec << endl;
    myvar.Use_axnorm = false;
 
    std::ostringstream strs;
-   strs << "Sig" << myvar.Scaling_sigma;
+   strs << "S" << myvar.Scaling_sigma;
    myvar.Sigma_str = strs.str();
  }
 
  // use the diagonal or block diagonal approximation for W block.
- string w_block_str = "";
  if(CommandLineArgs::command_line_flag_has_been_set("--diagw"))
  {
    myvar.Use_diagonal_w_block = true;
-   w_block_str = "diagw";
+   myvar.W_approx_str = "dw";
  }
  else
  {
    myvar.Use_diagonal_w_block = false;
-   w_block_str = "bdiagw";
+   myvar.W_approx_str = "bdw";
  }
 
 
  // Setup the label. Used for doc solution and preconditioner.
  if(myvar.NS_solver == 0)
  {
-   doc_info.label() = w_block_str + myvar.Prob_str + myvar.W_str + myvar.NS_str + myvar.Vis_str
+   doc_info.label() = myvar.Prob_str + myvar.W_str + myvar.NS_str + myvar.Vis_str
                       + myvar.Ang_str + myvar.Rey_str + myvar.Noel_str
-                      + myvar.Sigma_str;
+                      + myvar.Sigma_str + myvar.W_approx_str;
  }
  else if(myvar.NS_solver == 1)
  {
-   doc_info.label() = w_block_str + myvar.Prob_str
+   doc_info.label() = myvar.Prob_str
                       + myvar.W_str + myvar.NS_str + myvar.F_str + myvar.P_str
                       + myvar.Vis_str + myvar.Ang_str + myvar.Rey_str
-                      + myvar.Noel_str + myvar.Sigma_str;
+                      + myvar.Noel_str + myvar.Sigma_str + myvar.W_approx_str;
  }
  else
  {
