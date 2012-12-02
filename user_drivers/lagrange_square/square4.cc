@@ -95,6 +95,7 @@ struct SquareLagrangeVariables{
     Use_axnorm(true), // Use norm of velocity in the x direction for Sigma.
     Use_diagonal_w_block(true) // Use the diagonal approximation for W.
   {}
+
 };
 
 namespace oomph

@@ -313,7 +313,7 @@ namespace oomph
       (inv_p_mass_pt, inv_vmm_pts(0,vdof_i), do_both, 
        required_block_number,problem_pt);
   }
-    pause("doumooo"); 
+   // pause("doumooo"); 
     
     
   double ivmm_assembly_finish_t = TimingHelpers::timer();

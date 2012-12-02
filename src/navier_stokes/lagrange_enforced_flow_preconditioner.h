@@ -963,7 +963,7 @@ class LagrangeEnforcedflowPreconditioner
   {
     this->set_mesh(mesh_i,problem_pt,Meshes_pts[mesh_i]);
   }
-
+  
   // Reset some variables:
   N_dof_types = 0;
   Ndoftype_in_mesh.assign(nmesh,0);
@@ -996,8 +996,73 @@ class LagrangeEnforcedflowPreconditioner
   N_fluid_dof_types = N_velocity_dof_types + 1;
   N_lagrange_dof_types = N_dof_types - N_fluid_dof_types;
 
+
+// Testing: ///////////////////////////////////////////////////////////////////
+// I should get:
+// 0 4 8 12 1 5 9 13 2 6 10 14 15 3 7 11 16 17 18
+//  nmesh = 4;
+//  Ndoftype_in_mesh.resize(nmesh,0);
+//  Ndoftype_in_mesh[0] = 4;
+//  Ndoftype_in_mesh[1] = 4;
+//  Ndoftype_in_mesh[2] = 5;
+//  Ndoftype_in_mesh[3] = 6;
+//  N_dof_types = 19;
+//  elemental_dimension = 3;
+//  N_velocity_dof_types = elemental_dimension*nmesh;
+///////////////////////////////////////////////////////////////////////////////
+  
+  // Re-order the dof_types.
+  // The natural ordering of the dof types are ordered by their meshes.
+  // We want to group all the velocities (together with their directions),
+  // Then the pressure, finally the Lagrange multiplier block.
+  // Consider the same example above:
+  // [0 1 2 3] [4  5  6   7   8 ] [9  10 11 12]
+  // [u v w p] [up vp wp Lp1 Lp2] [ut vt wt Lt1]
+  //
+  // We want:
+  //  0 3 6 |9|   1  4  7  |10  11 |   2  5  8  |12 |
+  // [u v w |p|] [up vp wp |Lp1 Lp2|] [ut vt wt |Lt1|]
+  //    MESH1            MESH2            
+  //
+  // We have elemental_dimension and Ndoftype_in_mesh[].
+  Vector<unsigned>block_setup_vpl(N_dof_types,0);
+
+  // Loop through the meshes
+  unsigned temp_index = 0;
+  unsigned lagrange_entry = N_velocity_dof_types;
+  for (unsigned mesh_i = 0; mesh_i < nmesh; mesh_i++) 
+  {
+    // Fill in the velocity doftypes of the current mesh.
+    // dim_i * nmesh gives constants per mesh, we increment this with mesh_i
+    // for each subsequent mesh.
+    for (unsigned dim_i = 0; dim_i < elemental_dimension; dim_i++) 
+    {
+      block_setup_vpl[temp_index] = dim_i * nmesh + mesh_i;
+      temp_index++;
+    }
+
+    // Now that all the velocity dof types of this mesh is filled,
+    // we fill in the pressure or lagrange multiplier types.
+    for (unsigned doftype_i = elemental_dimension;
+         doftype_i < Ndoftype_in_mesh[mesh_i]; doftype_i++)
+    {
+      block_setup_vpl[temp_index] = lagrange_entry;
+      temp_index++;
+      lagrange_entry++;
+    }
+  }
+  
+  // print it:
+//  std::cout << "block_setup_vpl: " << std::endl;
+//  for (unsigned i = 0; i < N_dof_types; i++) 
+//  {
+//    std::cout << block_setup_vpl[i] << " ";
+//  }
+//  std::cout << std::endl; 
+//  pause("done new vpl"); 
+
   // Call block setup for this preconditioner
-  this->block_setup(problem_pt,matrix_pt);
+  this->block_setup(problem_pt,matrix_pt,block_setup_vpl);
 
   // Recast Jacobian matrix to CRDoubleMatrix
 #ifdef PARANOID
@@ -1015,6 +1080,18 @@ class LagrangeEnforcedflowPreconditioner
   CRDoubleMatrix* cr_matrix_pt = static_cast<CRDoubleMatrix*>(matrix_pt);
 #endif
 
+//  for (unsigned block_i = 0; block_i < N_dof_types; block_i++) 
+//  {
+//    CRDoubleMatrix* temp_matrix_pt = 0;
+//    this->get_block(0,block_i,cr_matrix_pt,temp_matrix_pt);
+//    unsigned temp_matrix_ncol = temp_matrix_pt->ncol();
+//    std::cout << "block: " << block_i 
+//              << ", ncol: " << temp_matrix_ncol << std::endl; 
+//    
+//  }
+//  pause("done"); 
+
+
   // Re-order the dof_types.
   // The natural ordering of the dof types are ordered by their meshes.
   // We want to group all the velocities (together with their directions),
@@ -1030,6 +1107,7 @@ class LagrangeEnforcedflowPreconditioner
   // This is stored in Doftype_list_vpl,
 //std::cout << "N_dof_types: " << N_dof_types << std::endl; 
 //pause("test"); 
+
 
   Doftype_list_vpl.assign(N_dof_types,0);
   unsigned incre_i = 0;
